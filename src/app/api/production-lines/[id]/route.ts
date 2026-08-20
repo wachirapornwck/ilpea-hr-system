@@ -1,0 +1,149 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { adminDb } from '@/lib/firebase/admin';
+
+export const dynamic = 'force-dynamic';
+
+// ============================================================
+// PATCH /api/production-lines/[id] — แก้ไข
+// ============================================================
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { id } = params;
+    const body = await req.json();
+    const { requesterId, ...updates } = body;
+
+    if (!requesterId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: 'MISSING_REQUESTER', message: 'Missing requesterId' },
+        },
+        { status: 400 }
+      );
+    }
+
+    const requesterDoc = await adminDb
+      .collection('users')
+      .doc(requesterId)
+      .get();
+    const requester = requesterDoc.data() as any;
+    if (
+      !requesterDoc.exists ||
+      !['admin', 'hr_manager'].includes(requester?.role)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'HR or Admin only' },
+        },
+        { status: 403 }
+      );
+    }
+
+    const lineDoc = await adminDb.collection('productionLines').doc(id).get();
+    if (!lineDoc.exists) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'ไม่พบ Production Line' },
+        },
+        { status: 404 }
+      );
+    }
+
+    // ห้าม update code และ createdAt
+    delete updates.code;
+    delete updates.createdAt;
+    updates.updatedAt = new Date().toISOString();
+
+    await adminDb.collection('productionLines').doc(id).update(updates);
+
+    return NextResponse.json({
+      success: true,
+      data: { id, ...lineDoc.data(), ...updates },
+    });
+  } catch (error: any) {
+    console.error('PATCH /api/production-lines/[id] error:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: error.message },
+      },
+      { status: 500 }
+    );
+  }
+}
+
+// ============================================================
+// DELETE /api/production-lines/[id] — Soft Delete
+// ============================================================
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { id } = params;
+    const { searchParams } = new URL(req.url);
+    const requesterId = searchParams.get('requesterId');
+
+    if (!requesterId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: 'MISSING_REQUESTER', message: 'Missing requesterId' },
+        },
+        { status: 400 }
+      );
+    }
+
+    const requesterDoc = await adminDb
+      .collection('users')
+      .doc(requesterId)
+      .get();
+    const requester = requesterDoc.data() as any;
+    if (
+      !requesterDoc.exists ||
+      !['admin', 'hr_manager'].includes(requester?.role)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'HR or Admin only' },
+        },
+        { status: 403 }
+      );
+    }
+
+    const lineDoc = await adminDb.collection('productionLines').doc(id).get();
+    if (!lineDoc.exists) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'ไม่พบ Production Line' },
+        },
+        { status: 404 }
+      );
+    }
+
+    await adminDb.collection('productionLines').doc(id).update({
+      active: false,
+      updatedAt: new Date().toISOString(),
+    });
+
+    return NextResponse.json({ success: true, data: { id, active: false } });
+  } catch (error: any) {
+    console.error('DELETE /api/production-lines/[id] error:', error);
+    return NextResponse.json(
+      {
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: error.message },
+      },
+      { status: 500 }
+    );
+  }
+}
